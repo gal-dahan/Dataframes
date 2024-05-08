@@ -1,44 +1,40 @@
 package operation
 
 import (
-	"github.com/gal-dahan/Dataframes/pipeline"
-	"strconv"
 	"math"
+	"strconv"
+
+	"github.com/gal-dahan/Dataframes/pipeline"
 )
 
 func FilterRows(condition func([]string) bool) pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var filteredRows [][]string
-		for _, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			if condition(row) {
-				filteredRows = append(filteredRows, row)
+				out <- row
 			}
 		}
-		return filteredRows
 	})
 }
 
 func GetColumn(index int) pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var column []string
-		for _, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			if index >= 0 && index < len(row) {
-				column = append(column, row[index])
+				out <- []string{row[index]}
 			}
 		}
-		return [][]string{column}
 	})
 }
 
 func Avg() pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var avgs [][]string
-		for _, row := range rows {
-			if len(row) == 0 {
-				continue
-			}
-			var sum float64
-			count := 0
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		var sum float64
+		count := 0
+		for row := range in {
 			for _, val := range row {
 				num, err := strconv.ParseFloat(val, 64)
 				if err == nil {
@@ -46,19 +42,18 @@ func Avg() pipeline.Operation {
 					count++
 				}
 			}
-			if count > 0 {
-				avg := sum / float64(count)
-				avgs = append(avgs, []string{strconv.FormatFloat(avg, 'f', -1, 64)})
-			}
 		}
-		return avgs
+		if count > 0 {
+			avg := sum / float64(count)
+			out <- []string{strconv.FormatFloat(avg, 'f', -1, 64)}
+		}
 	})
 }
 
 func Ceil() pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var ceiled [][]string
-		for _, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			var newRow []string
 			for _, val := range row {
 				num, err := strconv.ParseFloat(val, 64)
@@ -67,57 +62,61 @@ func Ceil() pipeline.Operation {
 					newRow = append(newRow, strconv.FormatFloat(ceilValue, 'f', -1, 64))
 				}
 			}
-			ceiled = append(ceiled, newRow)
+			out <- newRow
 		}
-		return ceiled
 	})
 }
+
 func ForEveryColumn() pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		for i, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			for j, cell := range row {
 				num, err := strconv.Atoi(cell)
 				if err == nil {
-					rows[i][j] = strconv.Itoa(num * 2)
+					row[j] = strconv.Itoa(num * 2)
 				}
 			}
+			out <- row
 		}
-		return rows
 	})
 }
 
 func GetColumns(indices ...int) pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var selected [][]string
-		for _, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			var newRow []string
 			for _, idx := range indices {
 				if idx >= 0 && idx < len(row) {
 					newRow = append(newRow, row[idx])
 				}
 			}
-			selected = append(selected, newRow)
+			out <- newRow
 		}
-		return selected
 	})
 }
 
 func GetRows(indices ...int) pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var selected [][]string
-		for _, idx := range indices {
-			if idx >= 0 && idx < len(rows) {
-				selected = append(selected, rows[idx])
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for idx := range indices {
+			if idx >= 0 {
+				for i := 0; i <= idx; i++ {
+					row := <-in
+					if i == idx {
+						out <- row
+					}
+				}
 			}
 		}
-		return selected
 	})
 }
 
 func SumRow() pipeline.Operation {
-	return pipeline.OperationFunc(func(rows [][]string) [][]string {
-		var summed [][]string
-		for _, row := range rows {
+	return pipeline.OperationFunc(func(in <-chan []string, out chan<- []string) {
+		defer close(out)
+		for row := range in {
 			sum := 0
 			for _, cell := range row {
 				num, err := strconv.Atoi(cell)
@@ -125,8 +124,7 @@ func SumRow() pipeline.Operation {
 					sum += num
 				}
 			}
-			summed = append(summed, []string{strconv.Itoa(sum)})
+			out <- []string{strconv.Itoa(sum)}
 		}
-		return summed
 	})
 }

@@ -1,5 +1,5 @@
 package table
 
 type TableReader interface {
-	Read() ([][]string, error)
+	Read() (<-chan []string, error)
 }

@@ -1,25 +1,29 @@
 package pipeline
+
 import (
 	"encoding/csv"
 	"io"
 	"log"
 	"os"
+
 	"github.com/gal-dahan/Dataframes/table"
 )
 
 type Operation interface {
-	Apply([][]string) [][]string
+	Apply(in <-chan []string, out chan<- []string)
 }
 
 type Pipeline struct {
 	reader table.TableReader
 	ops    []Operation
 }
-type OperationFunc func([][]string) [][]string
 
-func (f OperationFunc) Apply(rows [][]string) [][]string {
-	return f(rows)
+type OperationFunc func(in <-chan []string, out chan<- []string)
+
+func (f OperationFunc) Apply(in <-chan []string, out chan<- []string) {
+	f(in, out)
 }
+
 func (p *Pipeline) Read(reader table.TableReader) *Pipeline {
 	p.reader = reader
 	return p
@@ -33,23 +37,35 @@ func (p *Pipeline) With(op Operation) *Pipeline {
 func Read(path string) *Pipeline {
 	return &Pipeline{reader: &CSVTableReader{path: path}}
 }
+
 type CSVTableReader struct {
 	path string
 }
 
-func (r *CSVTableReader) Read() ([][]string, error) {
+func (r *CSVTableReader) Read() (<-chan []string, error) {
 	file, err := os.Open(r.path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
 	csvReader := csv.NewReader(file)
-	records, err := csvReader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	return records, nil
+
+	out := make(chan []string)
+	go func() {
+		defer close(out)
+		for {
+			record, err := csvReader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Println("Error reading CSV:", err)
+				continue
+			}
+			out <- record
+		}
+	}()
+	return out, nil
 }
 
 func (p *Pipeline) Write(path string) {
@@ -63,15 +79,19 @@ func (p *Pipeline) Write(path string) {
 	defer csvWriter.Flush()
 
 	rows, err := p.reader.Read()
-	if err != nil && err != io.EOF {
+	if err != nil {
 		log.Fatal(err)
 	}
 
 	for _, op := range p.ops {
-		rows = op.Apply(rows)
+		out := make(chan []string)
+		go op.Apply(rows, out)
+		rows = out
 	}
 
-	if err := csvWriter.WriteAll(rows); err != nil {
-		log.Fatal(err)
+	for row := range rows {
+		if err := csvWriter.Write(row); err != nil {
+			log.Println("Error writing row to CSV:", err)
+		}
 	}
 }
